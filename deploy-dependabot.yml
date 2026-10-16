@@ -1,0 +1,106 @@
+name: Deploy dependabot.yml to org repos
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Which repos to target'
+        type: choice
+        options: [specific, all]
+        default: specific
+      repositories:
+        description: 'Comma-separated repo names (used when target = specific)'
+        type: string
+        required: false
+      exclude:
+        description: 'Comma-separated repo names to skip (used when target = all)'
+        type: string
+        required: false
+      overwrite:
+        description: 'Overwrite dependabot.yml if it already exists'
+        type: boolean
+        default: false
+      create_pr:
+        description: 'Open a PR instead of committing to the default branch'
+        type: boolean
+        default: true
+      batch_size:
+        description: 'Repos per batch'
+        type: number
+        default: 20
+      dry_run:
+        description: 'Dry run (-WhatIf), no changes made'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-rollout
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify GitHub CLI
+        shell: pwsh
+        run: |
+          if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+            throw 'gh is not installed on this runner. Install with: winget install --id GitHub.cli'
+          }
+          gh --version
+
+      # Org-wide token. The built-in GITHUB_TOKEN can only touch this repo.
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.DEPENDABOT_ROLLOUT_APP_ID }}
+          private-key: ${{ secrets.DEPENDABOT_ROLLOUT_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Deploy dependabot.yml
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Using a PAT instead? Replace the line above with:
+          # GH_TOKEN: ${{ secrets.DEPENDABOT_ROLLOUT_PAT }}
+          ORG: ${{ github.repository_owner }}
+          TARGET: ${{ inputs.target }}
+          REPOS: ${{ inputs.repositories }}
+          EXCLUDE: ${{ inputs.exclude }}
+          OVERWRITE: ${{ inputs.overwrite }}
+          CREATE_PR: ${{ inputs.create_pr }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+
+          $params = @{
+            Organization = $env:ORG
+            SourceFile   = '.github/dependabot-template/dependabot.yml'
+            BatchSize    = [int]$env:BATCH_SIZE
+          }
+
+          if ($env:TARGET -eq 'specific') {
+            $list = @($env:REPOS -split '[,\s]+' | Where-Object { $_ })
+            if ($list.Count -eq 0) { throw 'Provide "repositories" when target = specific.' }
+            $params.Repository = $list
+          }
+          elseif ($env:EXCLUDE) {
+            $params.ExcludeRepository = @($env:EXCLUDE -split '[,\s]+' | Where-Object { $_ })
+          }
+
+          if ($env:OVERWRITE -eq 'true') { $params.Overwrite = $true }
+          if ($env:CREATE_PR -eq 'true') { $params.CreatePullRequest = $true }
+          if ($env:DRY_RUN   -eq 'true') { $params.WhatIf = $true }
+
+          ./scripts/Deploy-DependabotConfig.ps1 @params
+
