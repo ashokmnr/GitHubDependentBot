@@ -291,7 +291,12 @@ $jsonFields = 'name,defaultBranchRef,isArchived,isEmpty'
 if ($PSCmdlet.ParameterSetName -eq 'SpecificRepos') {
     Write-Host "Resolving $($Repository.Count) specified repo(s) in '$Organization'..." -ForegroundColor Cyan
     $repos = foreach ($r in $Repository) {
-        $repoName = ($r -split '/')[-1].Trim()
+        $parts = $r.Trim() -split '/'
+        if ($parts.Count -gt 1 -and $parts[0] -ne $Organization) {
+            $results.Add((New-Result $r.Trim() 'Skipped' "Belongs to org '$($parts[0])', not '$Organization'"))
+            continue
+        }
+        $repoName = $parts[-1]
         try {
             ConvertTo-RepoInfo (Invoke-Gh @('repo', 'view', "$Organization/$repoName", '--json', $jsonFields) | ConvertFrom-Json)
         }
