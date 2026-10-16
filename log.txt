@@ -1,0 +1,11 @@
+Run $params = @{
+Deploy-DependabotConfig.ps1: /home/runner/work/_temp/346f0ba6-68b4-4abb-b87b-27b456b12755.ps1:21
+Line |
+  21 |  ./scripts/Deploy-DependabotConfig.ps1 @params
+     |                                        ~~~~~~~
+     | Cannot validate argument on parameter 'SourceFile'. The " Test-Path $_
+     | -PathType Leaf " validation script for the argument with value
+     | ".github/dependabot-template/dependabot.yml" did not return a result of
+     | True. Determine why the validation script failed, and then try the
+     | command again.
+Error: Process completed with exit code 1.
