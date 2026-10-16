@@ -1,12 +1,12 @@
 Run $params = @{
-  
 Resolving 1 specified repo(s) in 'njm-poc'...
 Processing 1 repo(s) in 1 batch(es) of up to 20. Overwrite=False, PR mode=False
+
 === Batch 1/1 (1 repos) ===
-What if: Performing the operation "Create .github/dependabot.yml on develop" on target "njm-poc/SecretScanningPoc".
-[WhatIf   ] SecretScanningPoc Create on develop
+[Skipped  ] SecretScanningPoc Empty repository
+
 === Summary ===
-Status Count
------- -----
-WhatIf     1
-Error: Process completed with exit code 1.
+
+Status  Count
+------  -----
+Skipped     1
