@@ -6,23 +6,21 @@ on:
       organization:
         description: 'Organization to deploy to'
         type: choice
-        options:          # keep in sync with ALL_ORGS in the setup job
+        options:
           - org-a
           - org-b
           - org-c
-          - all
-        default: org-a
       target:
         description: 'Which repos to target'
         type: choice
         options: [specific, all]
         default: specific
       repositories:
-        description: 'Comma-separated repo names (or org/repo when organization = all)'
+        description: 'Comma-separated repo names (used when target = specific)'
         type: string
         required: false
       exclude:
-        description: 'Comma-separated repos to skip when target = all (org/repo or plain name)'
+        description: 'Comma-separated repo names to skip (used when target = all)'
         type: string
         required: false
       overwrite:
@@ -46,46 +44,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: dependabot-rollout
+  group: dependabot-rollout-${{ inputs.organization }}
   cancel-in-progress: false
 
 jobs:
-  setup:
-    name: Resolve organizations
-    runs-on: ubuntu-latest
-    outputs:
-      orgs: ${{ steps.orgs.outputs.json }}
-    steps:
-      - id: orgs
-        shell: pwsh
-        env:
-          SELECTED: ${{ inputs.organization }}
-          ALL_ORGS: 'org-a,org-b,org-c'   # used when "all" is selected; keep in sync with the options above
-        run: |
-          # @(...) keeps a single org as an array so the matrix gets ["org-a"], not "org-a"
-          $orgs = @(
-            if ($env:SELECTED -eq 'all') { $env:ALL_ORGS -split '[,\s]+' | Where-Object { $_ } }
-            else { $env:SELECTED }
-          )
-
-          Write-Host "Organizations: $($orgs -join ', ')"
-          $json = ConvertTo-Json -InputObject $orgs -Compress
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "json=$json"
-
   deploy:
-    name: Deploy to ${{ matrix.org }}
-    needs: setup
+    name: Deploy to ${{ inputs.organization }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    strategy:
-      fail-fast: false        # one org failing doesn't cancel the others
-      max-parallel: 1         # one org at a time; raise if you want orgs in parallel
-      matrix:
-        org: ${{ fromJSON(needs.setup.outputs.orgs) }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false   # the script uses gh + the App token, not git credentials
 
       # pwsh and gh are preinstalled on GitHub-hosted Ubuntu runners
       - name: Show tool versions
@@ -94,14 +66,14 @@ jobs:
           $PSVersionTable.PSVersion.ToString()
           gh --version
 
-      # Token scoped to this matrix org. The App must be installed in every org you target.
+      # Token scoped to the selected org. The App must be installed in that org.
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          app-id: ${{ vars.DEPENDABOT_ROLLOUT_APP_ID }}
+          client-id: ${{ vars.DEPENDABOT_ROLLOUT_CLIENT_ID }}
           private-key: ${{ secrets.DEPENDABOT_ROLLOUT_APP_KEY }}
-          owner: ${{ matrix.org }}
+          owner: ${{ inputs.organization }}
 
       - name: Deploy dependabot.yml
         shell: pwsh
@@ -109,7 +81,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # Using a PAT instead? Replace the line above with:
           # GH_TOKEN: ${{ secrets.DEPENDABOT_ROLLOUT_PAT }}
-          ORG: ${{ matrix.org }}
+          ORG: ${{ inputs.organization }}
           TARGET: ${{ inputs.target }}
           REPOS: ${{ inputs.repositories }}
           EXCLUDE: ${{ inputs.exclude }}
@@ -118,35 +90,19 @@ jobs:
           BATCH_SIZE: ${{ inputs.batch_size }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          $org = $env:ORG
-
-          # Keep entries for this org: "org/repo" when the org matches, plain names always
-          function Select-ForOrg([string]$list) {
-            foreach ($e in @($list -split '[,\s]+' | Where-Object { $_ })) {
-              if ($e -match '^([^/]+)/(.+)$') {
-                if ($Matches[1] -eq $org) { $Matches[2] }
-              }
-              else { $e }
-            }
-          }
-
           $params = @{
-            Organization = $org
+            Organization = $env:ORG
             SourceFile   = '.github/dependabot-template/dependabot.yml'
             BatchSize    = [int]$env:BATCH_SIZE
           }
 
           if ($env:TARGET -eq 'specific') {
-            $list = @(Select-ForOrg $env:REPOS)
-            if ($list.Count -eq 0) {
-              Write-Host "No repositories listed for '$org'. Nothing to do."
-              exit 0
-            }
+            $list = @($env:REPOS -split '[,\s]+' | Where-Object { $_ })
+            if ($list.Count -eq 0) { throw 'Provide "repositories" when target = specific.' }
             $params.Repository = $list
           }
-          else {
-            $exclude = @(Select-ForOrg $env:EXCLUDE)
-            if ($exclude.Count) { $params.ExcludeRepository = $exclude }
+          elseif ($env:EXCLUDE) {
+            $params.ExcludeRepository = @($env:EXCLUDE -split '[,\s]+' | Where-Object { $_ })
           }
 
           if ($env:OVERWRITE -eq 'true') { $params.Overwrite = $true }
