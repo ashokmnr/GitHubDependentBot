@@ -3,17 +3,26 @@ name: Deploy dependabot.yml to org repos
 on:
   workflow_dispatch:
     inputs:
+      organization:
+        description: 'Organization to deploy to'
+        type: choice
+        options:          # keep in sync with ALL_ORGS in the setup job
+          - org-a
+          - org-b
+          - org-c
+          - all
+        default: org-a
       target:
         description: 'Which repos to target'
         type: choice
         options: [specific, all]
         default: specific
       repositories:
-        description: 'Comma-separated repo names (used when target = specific)'
+        description: 'Comma-separated repo names (or org/repo when organization = all)'
         type: string
         required: false
       exclude:
-        description: 'Comma-separated repo names to skip (used when target = all)'
+        description: 'Comma-separated repos to skip when target = all (org/repo or plain name)'
         type: string
         required: false
       overwrite:
@@ -41,9 +50,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  setup:
+    name: Resolve organizations
+    runs-on: ubuntu-latest
+    outputs:
+      orgs: ${{ steps.orgs.outputs.json }}
+    steps:
+      - id: orgs
+        shell: pwsh
+        env:
+          SELECTED: ${{ inputs.organization }}
+          ALL_ORGS: 'org-a,org-b,org-c'   # used when "all" is selected; keep in sync with the options above
+        run: |
+          # @(...) keeps a single org as an array so the matrix gets ["org-a"], not "org-a"
+          $orgs = @(
+            if ($env:SELECTED -eq 'all') { $env:ALL_ORGS -split '[,\s]+' | Where-Object { $_ } }
+            else { $env:SELECTED }
+          )
+
+          Write-Host "Organizations: $($orgs -join ', ')"
+          $json = ConvertTo-Json -InputObject $orgs -Compress
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "json=$json"
+
   deploy:
+    name: Deploy to ${{ matrix.org }}
+    needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    strategy:
+      fail-fast: false        # one org failing doesn't cancel the others
+      max-parallel: 1         # one org at a time; raise if you want orgs in parallel
+      matrix:
+        org: ${{ fromJSON(needs.setup.outputs.orgs) }}
 
     steps:
       - name: Checkout
@@ -56,14 +94,14 @@ jobs:
           $PSVersionTable.PSVersion.ToString()
           gh --version
 
-      # Org-wide token. The built-in GITHUB_TOKEN can only touch this repo.
+      # Token scoped to this matrix org. The App must be installed in every org you target.
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.DEPENDABOT_ROLLOUT_APP_ID }}
           private-key: ${{ secrets.DEPENDABOT_ROLLOUT_APP_KEY }}
-          owner: ${{ github.repository_owner }}
+          owner: ${{ matrix.org }}
 
       - name: Deploy dependabot.yml
         shell: pwsh
@@ -71,7 +109,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           # Using a PAT instead? Replace the line above with:
           # GH_TOKEN: ${{ secrets.DEPENDABOT_ROLLOUT_PAT }}
-          ORG: ${{ github.repository_owner }}
+          ORG: ${{ matrix.org }}
           TARGET: ${{ inputs.target }}
           REPOS: ${{ inputs.repositories }}
           EXCLUDE: ${{ inputs.exclude }}
@@ -80,19 +118,35 @@ jobs:
           BATCH_SIZE: ${{ inputs.batch_size }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
+          $org = $env:ORG
+
+          # Keep entries for this org: "org/repo" when the org matches, plain names always
+          function Select-ForOrg([string]$list) {
+            foreach ($e in @($list -split '[,\s]+' | Where-Object { $_ })) {
+              if ($e -match '^([^/]+)/(.+)$') {
+                if ($Matches[1] -eq $org) { $Matches[2] }
+              }
+              else { $e }
+            }
+          }
+
           $params = @{
-            Organization = $env:ORG
+            Organization = $org
             SourceFile   = '.github/dependabot-template/dependabot.yml'
             BatchSize    = [int]$env:BATCH_SIZE
           }
 
           if ($env:TARGET -eq 'specific') {
-            $list = @($env:REPOS -split '[,\s]+' | Where-Object { $_ })
-            if ($list.Count -eq 0) { throw 'Provide "repositories" when target = specific.' }
+            $list = @(Select-ForOrg $env:REPOS)
+            if ($list.Count -eq 0) {
+              Write-Host "No repositories listed for '$org'. Nothing to do."
+              exit 0
+            }
             $params.Repository = $list
           }
-          elseif ($env:EXCLUDE) {
-            $params.ExcludeRepository = @($env:EXCLUDE -split '[,\s]+' | Where-Object { $_ })
+          else {
+            $exclude = @(Select-ForOrg $env:EXCLUDE)
+            if ($exclude.Count) { $params.ExcludeRepository = $exclude }
           }
 
           if ($env:OVERWRITE -eq 'true') { $params.Overwrite = $true }
@@ -100,4 +154,3 @@ jobs:
           if ($env:DRY_RUN   -eq 'true') { $params.WhatIf = $true }
 
           ./scripts/Deploy-DependabotConfig.ps1 @params
-
