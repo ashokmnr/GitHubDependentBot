@@ -324,7 +324,7 @@ if ($repos.Count -eq 0) {
         $results | Format-Table -AutoSize
         exit 1
     }
-    return
+    exit 0
 }
 #endregion
 
@@ -368,4 +368,8 @@ if ($failed.Count) {
     Write-Warning "$($failed.Count) repo(s) failed. Re-run them with: -Repository $(($failed.Repository) -join ', ')"
     exit 1
 }
+
+# Explicit success code. Without this, PowerShell reports the exit code of the last
+# native command (gh), which is 1 after an expected 404 such as "file not found yet".
+exit 0
 #endregion
