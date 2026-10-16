@@ -1,11 +1,12 @@
 Run $params = @{
-Deploy-DependabotConfig.ps1: /home/runner/work/_temp/346f0ba6-68b4-4abb-b87b-27b456b12755.ps1:21
-Line |
-  21 |  ./scripts/Deploy-DependabotConfig.ps1 @params
-     |                                        ~~~~~~~
-     | Cannot validate argument on parameter 'SourceFile'. The " Test-Path $_
-     | -PathType Leaf " validation script for the argument with value
-     | ".github/dependabot-template/dependabot.yml" did not return a result of
-     | True. Determine why the validation script failed, and then try the
-     | command again.
+  
+Resolving 1 specified repo(s) in 'njm-poc'...
+Processing 1 repo(s) in 1 batch(es) of up to 20. Overwrite=False, PR mode=False
+=== Batch 1/1 (1 repos) ===
+What if: Performing the operation "Create .github/dependabot.yml on develop" on target "njm-poc/SecretScanningPoc".
+[WhatIf   ] SecretScanningPoc Create on develop
+=== Summary ===
+Status Count
+------ -----
+WhatIf     1
 Error: Process completed with exit code 1.
