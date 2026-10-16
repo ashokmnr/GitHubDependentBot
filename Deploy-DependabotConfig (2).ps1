@@ -56,7 +56,11 @@ param(
     [string]$Organization,
 
     [Parameter(Mandatory)]
-    [ValidateScript({ Test-Path $_ -PathType Leaf })]
+    [ValidateScript({
+        if (Test-Path $_ -PathType Leaf) { return $true }
+        $hint = @(Get-ChildItem -Force -Path (Split-Path $_ -Parent) -ErrorAction SilentlyContinue | ForEach-Object Name) -join ', '
+        throw "Source file '$_' not found. Current directory: $(Get-Location). Files in that folder: $(if ($hint) { $hint } else { '(folder missing)' })"
+    })]
     [string]$SourceFile,
 
     [Parameter(Mandatory, ParameterSetName = 'SpecificRepos')]
