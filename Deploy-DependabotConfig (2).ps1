@@ -41,9 +41,6 @@
 .PARAMETER Token
     Optional. If omitted, gh uses GH_TOKEN / GITHUB_TOKEN or your `gh auth login` session.
 
-.PARAMETER Hostname
-    GitHub host. Use your GHES hostname for GitHub Enterprise Server.
-
 .EXAMPLE
     .\Deploy-DependabotConfig.ps1 -Organization my-org -SourceFile .\dependabot.yml -WhatIf
 
@@ -81,8 +78,7 @@ param(
     [string]$CommitMessage = 'chore: add/update dependabot.yml',
     [string]$PrBranchName  = 'chore/dependabot-config',
     [string]$PrBody        = 'Adds or updates .github/dependabot.yml as part of the org-wide Dependabot rollout.',
-    [string]$Token,
-    [string]$Hostname      = 'github.com'
+    [string]$Token
 )
 
 Set-StrictMode -Version Latest
@@ -97,10 +93,7 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 
 $env:GH_PROMPT_DISABLED   = '1'
 $env:GH_NO_UPDATE_NOTIFIER = '1'
-if ($Hostname -ne 'github.com') { $env:GH_HOST = $Hostname }
-if ($Token) {
-    if ($Hostname -eq 'github.com') { $env:GH_TOKEN = $Token } else { $env:GH_ENTERPRISE_TOKEN = $Token }
-}
+if ($Token) { $env:GH_TOKEN = $Token }
 #endregion
 
 #region Helpers
@@ -276,10 +269,10 @@ function Deploy-DependabotFile {
 
 #region Pre-flight
 try {
-    Invoke-Gh @('auth', 'status', '--hostname', $Hostname) | Out-Null
+    Invoke-Gh @('auth', 'status', '--hostname', 'github.com') | Out-Null
 }
 catch {
-    throw "gh is not authenticated for $Hostname. Set GH_TOKEN, pass -Token, or run 'gh auth login'. $($_.Exception.Message)"
+    throw "gh is not authenticated for github.com. Set GH_TOKEN, pass -Token, or run 'gh auth login'. $($_.Exception.Message)"
 }
 
 $resolvedSource   = (Resolve-Path $SourceFile).Path
