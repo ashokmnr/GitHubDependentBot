@@ -265,8 +265,16 @@ function Deploy-DependabotFile {
     }
     catch {
         $status = Get-StatusCode $_
-        if ($status -eq 409) { return New-Result $name 'Skipped' 'Empty repository' }
-        return New-Result $name 'Failed' $_.Exception.Message
+        $message = $_.Exception.Message
+        # 409 means "repository is empty" only when GitHub says so. Rulesets, branch
+        # protection and push protection also answer 409, and those are real failures.
+        if ($status -eq 409 -and $message -match 'is empty') {
+            return New-Result $name 'Skipped' 'Empty repository'
+        }
+        if ($status -eq 409 -and $message -match 'rule violation|pull request') {
+            $message = "Blocked by branch rules on '$base' - re-run with -CreatePullRequest. $message"
+        }
+        return New-Result $name 'Failed' $message
     }
 }
 #endregion
